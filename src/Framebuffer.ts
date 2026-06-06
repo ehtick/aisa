@@ -53,7 +53,7 @@ export class Framebuffer {
     public bob: Texture;
     public triangleRasterizer = new FlatShadingTriangleRasterizer(this);
     public texturedTriangleRasterizer = new TexturedTriangleRasterizer(this);
-   
+
     public scaleClipBlitter = new ScaleClipBlitter(this);
     // public renderingPipeline: FlatShadingRenderingPipeline;
      public texturedRenderingPipeline: TexturingRenderingPipeline;
@@ -1536,6 +1536,34 @@ export class Framebuffer {
     public fakeSphere2(normal: Vector3f, tex: TextureCoordinate): void {
         tex.u = 0.5 + Math.asin(normal.x) / Math.PI;
         tex.v = 0.5 - Math.asin(normal.y) / Math.PI;
+    }
+
+    public  sphereMapCoords(r: Vector4f) {
+        // Normalize reflection vector
+        const len = Math.hypot(r.x, r.y, r.z);
+        const rx = r.x / len;
+        const ry = r.y / len;
+        const rz = r.z / len;
+
+        // OpenGL-style sphere mapping
+        const m = 2.0 * Math.sqrt(rx * rx + ry * ry + (rz + 1.0) * (rz + 1.0));
+
+        return {
+            u: rx / m + 0.5,
+            v: ry / m + 0.5,
+        };
+    }
+
+    public fakeSphere3(normal: Vector4f, eyeSpaceVertex: Vector4f, vertex: Vertex): void {
+        // https://www.mvps.org/directx/articles/spheremap.htm
+        // vertex.textureCoordinate.u = 0.5 + normal.x * 0.5;
+        // vertex.textureCoordinate.v = 0.5 - normal.y * 0.5;
+        const incidentVector = eyeSpaceVertex.normalize();
+        const reflectionVector = incidentVector.sub(normal.mul(incidentVector.dot(normal) * 2.0));
+
+        const result = this.sphereMapCoords(reflectionVector);
+        vertex.textureCoordinate.u =result.u;
+        vertex.textureCoordinate.v = result.v;
     }
 
     public drawLineDDA(start: Vector3f, end: Vector3f, color: number): void {

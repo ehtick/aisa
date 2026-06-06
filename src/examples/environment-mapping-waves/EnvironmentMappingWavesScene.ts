@@ -9,8 +9,9 @@ import { CullFace } from '../../CullFace';
 import { TexturingRenderingPipeline } from '../../rendering-pipelines/TexturingRenderingPipeline';
 
 interface IndexMesh {
-    points: Array<Vector4f>,
-    points2: Array<Vector4f>,
+    vertices: Array<Vector4f>,
+    deformedVertices: Array<Vector4f>,
+    transformedVertices: Array<Vector4f>,
     normals: Array<Vector4f>,
     normals2: Array<Vector4f>,
     index: Array<number>
@@ -24,8 +25,9 @@ export class EnvironmentMappingScene extends AbstractScene {
     private obj: IndexMesh;
     private texturedRenderingPipeline: TexturingRenderingPipeline;
     private plane: {
-        points: Vector4f[];
-        points2: Vector4f[];
+        vertices: Vector4f[];
+        deformedVertices: Vector4f[];
+        transformedVertices: Array<Vector4f>;
         normals: Vector4f[];
         normals2: Vector4f[];
         index:Array<number>;
@@ -35,12 +37,15 @@ export class EnvironmentMappingScene extends AbstractScene {
     public init(framebuffer: Framebuffer): Promise<any> {
         this.texturedRenderingPipeline = new TexturingRenderingPipeline(framebuffer);
         return Promise.all([
-    
+
             TextureUtils.load(require('@assets/flood.png'), false).then(
                 texture => this.blurred = texture
             ),
             TextureUtils.load(require('@assets/envmap.png'), false).then(
-                texture => this.env = texture
+                texture => {
+                    this.env = texture;
+                    this.env.setClamp(true)
+                }
             ),
         ]).then(() => this.plane = this.createPlane());
     }
@@ -56,30 +61,30 @@ export class EnvironmentMappingScene extends AbstractScene {
     public shadingPlaneEnv(framebuffer: Framebuffer, elapsedTime: number, plane: IndexMesh): void {
 
         framebuffer.wBuffer.fill(100);
-      
+
 
         const result = plane;
 
-        elapsedTime *= 0.2;
+        const elapsedTime2 = elapsedTime *1.2;
         const scale2 = (Math.sin(elapsedTime * 1.8) + 1) * 0.5;
-        for (let i = 0; i < result.points.length; i++) {
-            const y = result.points[i].y - 30;
-            const x = result.points[i].x - 50;
+        for (let i = 0; i < result.vertices.length; i++) {
+            const y = result.vertices[i].y - 30;
+            const x = result.vertices[i].x - 50;
             const length = Math.sqrt(x * x + y * y);
-            result.points2[i].y = result.points[i].y;
-            result.points2[i].x = result.points[i].x;
-            result.points2[i].z = result.points[i].z + (
-                Math.sin(result.points[i].y * 0.2 + elapsedTime * 2.83) * 5.3
-                + Math.sin(result.points[i].x * 0.5 + elapsedTime * 2.83) * 4.3) * scale2
-                + Math.sin(length * 0.4 - elapsedTime * 3.83) * 4.3;
+            result.deformedVertices[i].y = result.vertices[i].y;
+            result.deformedVertices[i].x = result.vertices[i].x;
+            result.deformedVertices[i].z = result.vertices[i].z + (
+                Math.sin(result.vertices[i].y * 0.2 + elapsedTime2 * 2.83) * 5.3
+                + Math.sin(result.vertices[i].x * 0.5 + elapsedTime2 * 2.83) * 4.3) * scale2
+                + Math.sin(length * 0.4 - elapsedTime2 * 3.83) * 3.3;
 
             result.normals[i].x = 0;
             result.normals[i].y = 0;
             result.normals[i].z = 0;
         }
-        elapsedTime *= 5;
+        elapsedTime *= 1;
 
-        const points = result.points2;
+        const points = result.deformedVertices;
         const index = result.index;
         const normals = result.normals;
 
@@ -111,28 +116,31 @@ export class EnvironmentMappingScene extends AbstractScene {
         const scale = 3.7;
 
         let modelViewMartrix = Matrix4f.constructScaleMatrix(scale, scale, scale).multiplyMatrix(Matrix4f.constructYRotationMatrix(Math.PI + Math.sin(elapsedTime * 3.75) * 0.25)
-            .multiplyMatrix(Matrix4f.constructXRotationMatrix(Math.PI / 5 + Math.sin(elapsedTime * 3.25) * 0.35).multiplyMatrix(Matrix4f.constructTranslationMatrix(-50, -25
+            .multiplyMatrix(Matrix4f.constructXRotationMatrix(Math.PI / 5 + Math.sin(elapsedTime * 1.25) * 0.35).multiplyMatrix(Matrix4f.constructTranslationMatrix(-50, -25
                 , 0))));
 
         modelViewMartrix = Matrix4f.constructTranslationMatrix(0, 0,
-            -200 + Math.sin(elapsedTime * 1.9) * 0)
+            -310 + Math.sin(elapsedTime * 1.9) * 0)
             .multiplyMatrix(modelViewMartrix);
 
-        const points2: Array<Vector4f> = result.points2;
+        const projectedPoints: Array<Vector4f> = result.deformedVertices;
+        const transformedPoints: Array<Vector4f> = result.transformedVertices;
         const normals2: Array<Vector4f> = result.normals2;
 
         const normalMatrix = modelViewMartrix.computeNormalMatrix();
 
+        // TODO: merge normal and point into one loop!!!
         for (let n = 0; n < normals.length; n++) {
             normalMatrix.multiplyHomArr(normals[n], normals2[n]);
         }
 
         for (let p = 0; p < points.length; p++) {
-            const transformed = modelViewMartrix.multiplyHom(points[p]);
+            modelViewMartrix.multiplyHomArr2(points[p], transformedPoints[p]);
+            const transformed = transformedPoints[p];
 
-            points2[p].x = Math.round((framebuffer.width * 0.5) + (transformed.x / (-transformed.z * 0.0078)));
-            points2[p].y = Math.round((framebuffer.height * 0.5) - (transformed.y / (-transformed.z * 0.0078)));
-            points2[p].z = transformed.z;
+            projectedPoints[p].x = Math.round((framebuffer.width * 0.5) + (transformed.x / (-transformed.z * 0.0038)));
+            projectedPoints[p].y = Math.round((framebuffer.height * 0.5) - (transformed.y / (-transformed.z * 0.0038)));
+            projectedPoints[p].z = transformed.z;
         }
 
         const vertex1 = new Vertex();
@@ -151,27 +159,31 @@ export class EnvironmentMappingScene extends AbstractScene {
             // 3D Game Engine Design: A Practical Approach to Real-Time Computer Graphics,
             // p. 69. Morgan Kaufmann Publishers, United States.
             //
-            const v1 = points2[index[i]];
+            const v1 = projectedPoints[index[i]];
+            const e1 = transformedPoints[index[i]];
             const n1 = normals2[index[i]];
 
-            const v2 = points2[index[i + 1]];
+            const v2 = projectedPoints[index[i + 1]];
+            const e2 = transformedPoints[index[i + 1]];
             const n2 = normals2[index[i + 1]];
 
-            const v3 = points2[index[i + 2]];
+            const v3 = projectedPoints[index[i + 2]];
+            const e3 = transformedPoints[index[i + 2]];
             const n3 = normals2[index[i + 2]];
 
             if (framebuffer.isTriangleCCW(v1, v2, v3)) {
 
                 // const color = 255 << 24 | 255 << 16 | 255 << 8 | 255;
 
+                // TODO: precompute texture coordinate only once for each vertex instead of multiple times per triangle!!!
                 vertexArray[0].projection = v1;
-                framebuffer.fakeSphere(n1, vertex1);
+                framebuffer.fakeSphere3(n1, e1, vertex1);
 
                 vertexArray[1].projection = v2;
-                framebuffer.fakeSphere(n2, vertex2);
+                framebuffer.fakeSphere3(n2, e2, vertex2);
 
                 vertexArray[2].projection = v3;
-                framebuffer.fakeSphere(n3, vertex3);
+                framebuffer.fakeSphere3(n3, e3, vertex3);
 /*
                 if (v1.x < Framebuffer.minWindow.x ||
                     v2.x < Framebuffer.minWindow.x ||
@@ -193,7 +205,7 @@ export class EnvironmentMappingScene extends AbstractScene {
             }
         }
     }
-    
+
 
 
     public createPlane() {
@@ -213,8 +225,9 @@ export class EnvironmentMappingScene extends AbstractScene {
             }
         }
         // optimize
-        const points: Array<Vector4f> = [];
-        const points2: Array<Vector4f> = [];
+        const vertices: Array<Vector4f> = [];
+        const deformedVertices: Array<Vector4f> = [];
+        const transformedVertices: Array<Vector4f>  = [];
         const normals: Array<Vector4f> = [];
         const normals2: Array<Vector4f> = [];
 
@@ -223,25 +236,27 @@ export class EnvironmentMappingScene extends AbstractScene {
         k.points.forEach((i) => {
             const p = i;
 
-            const point = points.find((pointVar) => pointVar.sub(p).length() < 0.001);
+            const point = vertices.find((pointVar) => pointVar.sub(p).length() < 0.001);
 
             if (point) {
-                const idx = points.indexOf(point);
+                const idx = vertices.indexOf(point);
                 index.push(idx);
             } else {
-                index.push(points.push(p) - 1);
+                index.push(vertices.push(p) - 1);
             }
         });
 
-        points.forEach(() => {
+        vertices.forEach(() => {
             normals.push(new Vector4f(0, 0, 0));
             normals2.push(new Vector4f(0, 0, 0));
-            points2.push(new Vector4f(0, 0, 0));
+            deformedVertices.push(new Vector4f(0, 0, 0));
+            transformedVertices.push(new Vector4f(0, 0, 0));
         });
 
         return {
-            points,
-            points2,
+            vertices,
+            deformedVertices,
+            transformedVertices,
             normals,
             normals2,
             index
